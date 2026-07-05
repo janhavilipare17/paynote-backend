@@ -1,6 +1,8 @@
 import express, { Request, Response } from "express";
 import cors from "cors";
 import { PayNote, CreatePayNoteRequest } from "./types";
+import { getPaynoteFromChain, markPaidOnChain } from "./contractClient";
+import { watchAccountForPayments } from "./paymentListener";
 
 const app = express();
 app.use(cors());
@@ -24,7 +26,56 @@ const paynotes: Record<string, PayNote> = {
   },
 };
 
-// Create a PayNote
+// Convert the raw on-chain PayNote shape into the shared frontend/backend
+// PayNote type (see src/types.ts). The contract stores timestamps as unix
+// seconds and amounts as i128 — we convert those into the strings/ISO
+// dates the rest of the API already uses.
+function mapChainPaynoteToApi(chain: any): PayNote {
+  const id = String(chain.id);
+  const status = String(chain.status).toLowerCase() as PayNote["status"];
+
+  const paynote: PayNote = {
+    id,
+    creatorAddress: chain.creator,
+    amount: chain.amount.toString(),
+    asset: chain.asset,
+    description: chain.description,
+    status,
+    createdAt: new Date(Number(chain.created_at) * 1000).toISOString(),
+    expiresAt: new Date(Number(chain.expires_at) * 1000).toISOString(),
+    paymentLink: `http://localhost:3000/pay/${id}`,
+  };
+
+  if (chain.paid_asset && chain.paid_asset !== "NONE") {
+    paynote.paidAmount = chain.paid_amount.toString();
+    paynote.paidAsset = chain.paid_asset;
+  }
+
+  return paynote;
+}
+
+// Sync a PayNote from the chain into our local cache. The frontend calls
+// this right after creating a PayNote directly on-chain via Freighter, so
+// our backend has a fast-readable copy instead of hitting Soroban RPC on
+// every page load.
+app.post("/api/paynotes/sync/:id", async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const chainId = Number(req.params.id);
+    const chainPaynote = await getPaynoteFromChain(chainId);
+    const paynote = mapChainPaynoteToApi(chainPaynote);
+    paynotes[paynote.id] = paynote;
+
+    // Now that we know this PayNote's creator address, start listening for
+    // a real payment to that account so we can auto mark_paid when it arrives.
+    watchAccountForPayments(paynote.creatorAddress);
+
+    res.json(paynote);
+  } catch (err: any) {
+    console.error("Sync failed:", err);
+    res.status(500).json({ error: "Failed to sync PayNote from chain", details: err.message });
+  }
+});
+
 app.post("/api/paynotes", (req: Request<{}, {}, CreatePayNoteRequest>, res: Response) => {
   const { creatorAddress, amount, asset, description, expiresAt } = req.body;
 

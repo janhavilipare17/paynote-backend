@@ -2,7 +2,7 @@ import express, { Request, Response } from "express";
 import cors from "cors";
 import { PayNote, CreatePayNoteRequest } from "./types";
 import { getPaynoteFromChain, markPaidOnChain } from "./contractClient";
-import { watchAccountForPayments } from "./paymentListener";
+import { watchAccountForPayments, backfillRecentPayments } from "./paymentListener";
 
 const app = express();
 app.use(cors());
@@ -67,12 +67,34 @@ app.post("/api/paynotes/sync/:id", async (req: Request<{ id: string }>, res: Res
 
     // Now that we know this PayNote's creator address, start listening for
     // a real payment to that account so we can auto mark_paid when it arrives.
-    watchAccountForPayments(paynote.creatorAddress);
+    // This also backfills recent payment history, catching payments that
+    // already happened before we started watching.
+    await watchAccountForPayments(paynote.creatorAddress);
 
     res.json(paynote);
   } catch (err: any) {
     console.error("Sync failed:", err);
     res.status(500).json({ error: "Failed to sync PayNote from chain", details: err.message });
+  }
+});
+
+// Manually trigger a check of recent payment history for a PayNote's
+// creator — useful if a payment happened before the listener was watching
+// (e.g. right after a server restart).
+app.post("/api/paynotes/:id/recheck", async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const paynote = paynotes[req.params.id];
+    if (!paynote) {
+      return res.status(404).json({ error: "PayNote not found in cache, sync it first" });
+    }
+    await backfillRecentPayments(paynote.creatorAddress);
+    await watchAccountForPayments(paynote.creatorAddress);
+    const refreshed = mapChainPaynoteToApi(await getPaynoteFromChain(Number(req.params.id)));
+    paynotes[refreshed.id] = refreshed;
+    res.json(refreshed);
+  } catch (err: any) {
+    console.error("Recheck failed:", err);
+    res.status(500).json({ error: "Recheck failed", details: err.message });
   }
 });
 

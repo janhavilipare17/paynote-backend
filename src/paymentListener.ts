@@ -23,17 +23,45 @@ function extractPaynoteIdFromMemo(memo: any): number | null {
 }
 
 /**
+ * Check recent payment history for an account (most recent first) and
+ * process any that match a pending PayNote. This closes the gap where a
+ * payment happens BEFORE the live stream starts watching (e.g. right after
+ * a server restart, or if sync/:id is called after the payment already
+ * landed) — without this, cursor("now") would silently miss it forever.
+ */
+export async function backfillRecentPayments(watchedAccount: string) {
+  try {
+    const page = await horizonServer
+      .payments()
+      .forAccount(watchedAccount)
+      .order("desc")
+      .limit(20)
+      .join("transactions")
+      .call();
+
+    for (const record of page.records as any[]) {
+      await handlePaymentRecord(record, watchedAccount);
+    }
+  } catch (err) {
+    console.error(`Backfill check failed for ${watchedAccount}:`, err);
+  }
+}
+
+/**
  * Start watching a creator's Stellar account for incoming payments.
  * Safe to call multiple times for the same account — it only opens one
  * stream per account.
  */
-export function watchAccountForPayments(creatorAddress: string) {
+export async function watchAccountForPayments(creatorAddress: string) {
   if (watchedAccounts.has(creatorAddress)) {
     return; // already watching this account
   }
   watchedAccounts.add(creatorAddress);
 
   console.log(`Starting payment listener for ${creatorAddress}`);
+
+  // Catch anything that already happened before we started watching.
+  await backfillRecentPayments(creatorAddress);
 
   horizonServer
     .payments()

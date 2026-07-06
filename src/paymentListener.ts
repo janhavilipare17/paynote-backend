@@ -39,9 +39,7 @@ export async function backfillRecentPayments(watchedAccount: string) {
       .join("transactions")
       .call();
 
-    console.log(`Backfill found ${page.records.length} records for ${watchedAccount}`);
-for (const record of page.records as any[]) {
-  console.log(`Record: type=${record.type} to=${record.to} amount=${record.amount}`);
+    for (const record of page.records as any[]) {
   await handlePaymentRecord(record, watchedAccount);
 }
   } catch (err) {
@@ -92,9 +90,9 @@ async function handlePaymentRecord(record: any, watchedAccount: string) {
     "path_payment_strict_receive",
   ];
   if (!relevantTypes.includes(record.type)) return;
-  console.log(`Skipped: type ${record.type} not in relevantTypes`);
+
   if (record.to !== watchedAccount) return;
-  console.log(`Skipped: record.to (${record.to}) !== watchedAccount (${watchedAccount})`);
+ 
 
   const memo = record.transaction ? (await record.transaction()).memo : undefined;
   const paynoteId = extractPaynoteIdFromMemo({ value: memo });

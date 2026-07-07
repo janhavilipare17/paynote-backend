@@ -1,12 +1,10 @@
 import { Horizon } from "@stellar/stellar-sdk";
 import { getPaynoteFromChain, markPaidOnChain } from "./contractClient";
-
+import { isAccountWatched, markAccountWatched, getAllWatchedAccounts } from "./db";
 const HORIZON_URL = "https://horizon-testnet.stellar.org";
 const horizonServer = new Horizon.Server(HORIZON_URL);
 
-// Tracks which creator accounts already have an active Horizon stream open,
-// so we don't open duplicate streams for the same account.
-const watchedAccounts = new Set<string>();
+
 
 /**
  * Convention: whoever pays a PayNote must include the PayNote's numeric id
@@ -53,13 +51,13 @@ export async function backfillRecentPayments(watchedAccount: string) {
  * stream per account.
  */
 export async function watchAccountForPayments(creatorAddress: string) {
-  if (watchedAccounts.has(creatorAddress)) {
+  const alreadyWatched = await isAccountWatched(creatorAddress);
+  if (alreadyWatched) {
     return; // already watching this account
   }
-  watchedAccounts.add(creatorAddress);
+  await markAccountWatched(creatorAddress);
 
   console.log(`Starting payment listener for ${creatorAddress}`);
-
   // Catch anything that already happened before we started watching.
   await backfillRecentPayments(creatorAddress);
 
@@ -125,4 +123,37 @@ async function handlePaymentRecord(record: any, watchedAccount: string) {
   await markPaidOnChain(paynoteId, paidAmount, paidAsset);
 
   console.log(`PayNote ${paynoteId} marked as paid on-chain.`);
+}
+
+// Called once on server startup — re-opens Horizon streams for every
+// account we were already watching before the last restart, since the
+// in-memory stream itself doesn't survive a restart even though the DB
+// record marking it "watched" does.
+// Called once on server startup — re-opens Horizon streams for every
+// account we were already watching before the last restart, since the
+// in-memory stream itself doesn't survive a restart even though the DB
+// record marking it "watched" does.
+export async function resumeWatchingAllAccounts() {
+  const accounts = await getAllWatchedAccounts();
+  console.log(`Resuming payment listeners for ${accounts.length} account(s)`);
+  for (const address of accounts) {
+    console.log(`Re-opening stream for ${address}`);
+    horizonServer
+      .payments()
+      .forAccount(address)
+      .cursor("now")
+      .join("transactions")
+      .stream({
+        onmessage: async (record: any) => {
+          try {
+            await handlePaymentRecord(record, address);
+          } catch (err) {
+            console.error("Error handling payment record:", err);
+          }
+        },
+        onerror: (err: any) => {
+          console.error(`Payment stream error for ${address}:`, err);
+        },
+      });
+  }
 }

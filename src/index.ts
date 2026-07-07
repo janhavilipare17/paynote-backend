@@ -1,30 +1,17 @@
+import "dotenv/config";
 import express, { Request, Response } from "express";
 import cors from "cors";
 import { PayNote, CreatePayNoteRequest } from "./types";
 import { getPaynoteFromChain, markPaidOnChain } from "./contractClient";
-import { watchAccountForPayments, backfillRecentPayments } from "./paymentListener";
-
+import { getPaynote, getPaynotesByCreator, upsertPaynote } from "./db";
+import { watchAccountForPayments, backfillRecentPayments, resumeWatchingAllAccounts } from "./paymentListener";
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const PORT = 3001;
 
-// In-memory fake store — will be replaced by real DB + contract calls later.
-// This lets the frontend build against real request/response shapes today.
-const paynotes: Record<string, PayNote> = {
-  "demo-1": {
-    id: "demo-1",
-    creatorAddress: "GABC1234EXAMPLEADDRESS",
-    amount: "100",
-    asset: "USDC",
-    description: "Logo Design",
-    status: "pending",
-    createdAt: new Date().toISOString(),
-    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-    paymentLink: "http://localhost:3000/pay/demo-1",
-  },
-};
+
 
 // Convert the raw on-chain PayNote shape into the shared frontend/backend
 // PayNote type (see src/types.ts). The contract stores timestamps as unix
@@ -63,7 +50,7 @@ app.post("/api/paynotes/sync/:id", async (req: Request<{ id: string }>, res: Res
     const chainId = Number(req.params.id);
     const chainPaynote = await getPaynoteFromChain(chainId);
     const paynote = mapChainPaynoteToApi(chainPaynote);
-    paynotes[paynote.id] = paynote;
+    await upsertPaynote(paynote);
 
     // Now that we know this PayNote's creator address, start listening for
     // a real payment to that account so we can auto mark_paid when it arrives.
@@ -77,20 +64,19 @@ app.post("/api/paynotes/sync/:id", async (req: Request<{ id: string }>, res: Res
     res.status(500).json({ error: "Failed to sync PayNote from chain", details: err.message });
   }
 });
-
 // Manually trigger a check of recent payment history for a PayNote's
 // creator — useful if a payment happened before the listener was watching
 // (e.g. right after a server restart).
 app.post("/api/paynotes/:id/recheck", async (req: Request<{ id: string }>, res: Response) => {
   try {
-    const paynote = paynotes[req.params.id];
+    const paynote = await getPaynote(req.params.id);
     if (!paynote) {
-      return res.status(404).json({ error: "PayNote not found in cache, sync it first" });
+      return res.status(404).json({ error: "PayNote not found in DB, sync it first" });
     }
     await backfillRecentPayments(paynote.creatorAddress);
     await watchAccountForPayments(paynote.creatorAddress);
     const refreshed = mapChainPaynoteToApi(await getPaynoteFromChain(Number(req.params.id)));
-    paynotes[refreshed.id] = refreshed;
+    await upsertPaynote(refreshed);
     res.json(refreshed);
   } catch (err: any) {
     console.error("Recheck failed:", err);
@@ -98,7 +84,7 @@ app.post("/api/paynotes/:id/recheck", async (req: Request<{ id: string }>, res: 
   }
 });
 
-app.post("/api/paynotes", (req: Request<{}, {}, CreatePayNoteRequest>, res: Response) => {
+app.post("/api/paynotes", async (req: Request<{}, {}, CreatePayNoteRequest>, res: Response) => {
   const { creatorAddress, amount, asset, description, expiresAt } = req.body;
 
   if (!creatorAddress || !amount || !asset || !description || !expiresAt) {
@@ -119,13 +105,13 @@ app.post("/api/paynotes", (req: Request<{}, {}, CreatePayNoteRequest>, res: Resp
     paymentLink: `http://localhost:3000/pay/${id}`,
   };
 
-  paynotes[id] = newPayNote;
+  await upsertPaynote(newPayNote);
   res.status(201).json(newPayNote);
 });
 
 // Fetch a single PayNote (for the payment page)
-app.get("/api/paynotes/:id", (req: Request<{ id: string }>, res: Response) => {
-  const paynote = paynotes[req.params.id];
+app.get("/api/paynotes/:id", async (req: Request<{ id: string }>, res: Response) => {
+  const paynote = await getPaynote(req.params.id);
   if (!paynote) {
     return res.status(404).json({ error: "PayNote not found" });
   }
@@ -133,13 +119,12 @@ app.get("/api/paynotes/:id", (req: Request<{ id: string }>, res: Response) => {
 });
 
 // List all PayNotes created by a given wallet address
-app.get("/api/paynotes/user/:address", (req: Request<{ address: string }>, res: Response) => {
-  const list = Object.values(paynotes).filter(
-    (p) => p.creatorAddress === req.params.address
-  );
+app.get("/api/paynotes/user/:address", async (req: Request<{ address: string }>, res: Response) => {
+  const list = await getPaynotesByCreator(req.params.address);
   res.json(list);
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`PayNote mock backend running at http://localhost:${PORT}`);
+  await resumeWatchingAllAccounts();
 });

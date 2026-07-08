@@ -3,7 +3,7 @@ import express, { Request, Response } from "express";
 import cors from "cors";
 import { PayNote, CreatePayNoteRequest } from "./types";
 import { getPaynoteFromChain, markPaidOnChain } from "./contractClient";
-import { getPaynote, getPaynotesByCreator, upsertPaynote } from "./db";
+import { getPaynote, getPaynotesByCreator, upsertPaynote, getReputationScore } from "./db";
 import { watchAccountForPayments, backfillRecentPayments, resumeWatchingAllAccounts } from "./paymentListener";
 const app = express();
 app.use(cors());
@@ -122,6 +122,16 @@ app.get("/api/paynotes/:id", async (req: Request<{ id: string }>, res: Response)
 app.get("/api/paynotes/user/:address", async (req: Request<{ address: string }>, res: Response) => {
   const list = await getPaynotesByCreator(req.params.address);
   res.json(list);
+});
+
+app.get("/api/reputation/:address", async (req: Request<{ address: string }>, res: Response) => {
+  try {
+    const reputation = await getReputationScore(req.params.address);
+    res.json(reputation);
+  } catch (err: any) {
+    console.error("Reputation lookup failed:", err);
+    res.status(500).json({ error: "Failed to compute reputation", details: err.message });
+  }
 });
 
 app.listen(PORT, async () => {

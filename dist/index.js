@@ -112,6 +112,16 @@ app.get("/api/paynotes/user/:address", async (req, res) => {
     const list = await (0, db_1.getPaynotesByCreator)(req.params.address);
     res.json(list);
 });
+app.get("/api/reputation/:address", async (req, res) => {
+    try {
+        const reputation = await (0, db_1.getReputationScore)(req.params.address);
+        res.json(reputation);
+    }
+    catch (err) {
+        console.error("Reputation lookup failed:", err);
+        res.status(500).json({ error: "Failed to compute reputation", details: err.message });
+    }
+});
 app.listen(PORT, async () => {
     console.log(`PayNote mock backend running at http://localhost:${PORT}`);
     await (0, paymentListener_1.resumeWatchingAllAccounts)();

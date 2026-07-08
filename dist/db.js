@@ -7,6 +7,7 @@ exports.upsertPaynote = upsertPaynote;
 exports.isAccountWatched = isAccountWatched;
 exports.markAccountWatched = markAccountWatched;
 exports.getAllWatchedAccounts = getAllWatchedAccounts;
+exports.getReputationScore = getReputationScore;
 const pg_1 = require("pg");
 exports.pool = new pg_1.Pool({
     connectionString: process.env.DATABASE_URL,
@@ -81,4 +82,25 @@ async function markAccountWatched(address) {
 async function getAllWatchedAccounts() {
     const result = await exports.pool.query("SELECT address FROM watched_accounts");
     return result.rows.map((r) => r.address);
+}
+async function getReputationScore(address) {
+    const result = await exports.pool.query(`SELECT status, COUNT(*) as count
+     FROM paynotes
+     WHERE creator_address = $1
+     GROUP BY status`, [address]);
+    let paidCount = 0;
+    let expiredCount = 0;
+    let pendingCount = 0;
+    for (const row of result.rows) {
+        const count = parseInt(row.count, 10);
+        if (row.status === "paid")
+            paidCount = count;
+        else if (row.status === "expired")
+            expiredCount = count;
+        else if (row.status === "pending")
+            pendingCount = count;
+    }
+    const resolvedCount = paidCount + expiredCount;
+    const score = resolvedCount === 0 ? 100 : Math.round((paidCount / resolvedCount) * 100);
+    return { address, paidCount, expiredCount, pendingCount, score };
 }

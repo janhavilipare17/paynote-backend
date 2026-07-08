@@ -93,3 +93,35 @@ export async function getAllWatchedAccounts(): Promise<string[]> {
   const result = await pool.query("SELECT address FROM watched_accounts");
   return result.rows.map((r: { address: string }) => r.address);
 }
+
+export async function getReputationScore(address: string): Promise<{
+  address: string;
+  paidCount: number;
+  expiredCount: number;
+  pendingCount: number;
+  score: number;
+}> {
+  const result = await pool.query(
+    `SELECT status, COUNT(*) as count
+     FROM paynotes
+     WHERE creator_address = $1
+     GROUP BY status`,
+    [address]
+  );
+
+  let paidCount = 0;
+  let expiredCount = 0;
+  let pendingCount = 0;
+
+  for (const row of result.rows) {
+    const count = parseInt(row.count, 10);
+    if (row.status === "paid") paidCount = count;
+    else if (row.status === "expired") expiredCount = count;
+    else if (row.status === "pending") pendingCount = count;
+  }
+
+  const resolvedCount = paidCount + expiredCount;
+  const score = resolvedCount === 0 ? 100 : Math.round((paidCount / resolvedCount) * 100);
+
+  return { address, paidCount, expiredCount, pendingCount, score };
+}

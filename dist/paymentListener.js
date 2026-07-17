@@ -109,7 +109,22 @@ async function handlePaymentRecord(record, watchedAccount) {
     const paidAsset = record.asset_type === "native" ? "XLM" : record.asset_code || "UNKNOWN";
     console.log(`Matched payment for PayNote ${paynoteId}: ${paidAmount} ${paidAsset}. Calling mark_paid...`);
     await (0, contractClient_1.markPaidOnChain)(paynoteId, paidAmount, paidAsset);
-    console.log(`PayNote ${paynoteId} marked as paid on-chain.`);
+    const updatedChainPaynote = await (0, contractClient_1.getPaynoteFromChain)(paynoteId);
+    const status = String(updatedChainPaynote.status).toLowerCase();
+    await (0, db_1.upsertPaynote)({
+        id: String(updatedChainPaynote.id),
+        creatorAddress: updatedChainPaynote.creator,
+        amount: updatedChainPaynote.amount.toString(),
+        asset: updatedChainPaynote.asset,
+        description: updatedChainPaynote.description,
+        status: status,
+        createdAt: new Date(Number(updatedChainPaynote.created_at) * 1000).toISOString(),
+        expiresAt: new Date(Number(updatedChainPaynote.expires_at) * 1000).toISOString(),
+        paidAmount: updatedChainPaynote.paid_amount?.toString(),
+        paidAsset: updatedChainPaynote.paid_asset,
+        paymentLink: `http://localhost:3000/pay/${updatedChainPaynote.id}`,
+    });
+    console.log(`PayNote ${paynoteId} marked as paid on-chain and synced to DB.`);
 }
 // Called once on server startup — re-opens Horizon streams for every
 // account we were already watching before the last restart, since the

@@ -1,6 +1,7 @@
 import { Horizon } from "@stellar/stellar-sdk";
 import { getPaynoteFromChain, markPaidOnChain } from "./contractClient";
-import { isAccountWatched, markAccountWatched, getAllWatchedAccounts } from "./db";
+
+import { isAccountWatched, markAccountWatched, getAllWatchedAccounts, upsertPaynote } from "./db";
 const HORIZON_URL = "https://horizon-testnet.stellar.org";
 const horizonServer = new Horizon.Server(HORIZON_URL);
 
@@ -122,7 +123,23 @@ async function handlePaymentRecord(record: any, watchedAccount: string) {
 
   await markPaidOnChain(paynoteId, paidAmount, paidAsset);
 
-  console.log(`PayNote ${paynoteId} marked as paid on-chain.`);
+  const updatedChainPaynote = await getPaynoteFromChain(paynoteId);
+  const status = String(updatedChainPaynote.status).toLowerCase();
+  await upsertPaynote({
+    id: String(updatedChainPaynote.id),
+    creatorAddress: updatedChainPaynote.creator,
+    amount: updatedChainPaynote.amount.toString(),
+    asset: updatedChainPaynote.asset,
+    description: updatedChainPaynote.description,
+    status: status as any,
+    createdAt: new Date(Number(updatedChainPaynote.created_at) * 1000).toISOString(),
+    expiresAt: new Date(Number(updatedChainPaynote.expires_at) * 1000).toISOString(),
+    paidAmount: updatedChainPaynote.paid_amount?.toString(),
+    paidAsset: updatedChainPaynote.paid_asset,
+    paymentLink: `http://localhost:3000/pay/${updatedChainPaynote.id}`,
+  });
+
+  console.log(`PayNote ${paynoteId} marked as paid on-chain and synced to DB.`);
 }
 
 // Called once on server startup — re-opens Horizon streams for every

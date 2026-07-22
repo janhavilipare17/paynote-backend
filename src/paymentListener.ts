@@ -1,6 +1,5 @@
 import { Horizon } from "@stellar/stellar-sdk";
 import { getPaynoteFromChain, markPaidOnChain } from "./contractClient";
-
 import { isAccountWatched, markAccountWatched, getAllWatchedAccounts, upsertPaynote } from "./db";
 const HORIZON_URL = "https://horizon-testnet.stellar.org";
 const horizonServer = new Horizon.Server(HORIZON_URL);

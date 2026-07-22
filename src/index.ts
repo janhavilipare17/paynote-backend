@@ -1,7 +1,7 @@
 import "dotenv/config";
 import express, { Request, Response } from "express";
 import cors from "cors";
-import { PayNote, CreatePayNoteRequest } from "./types";
+import { PayNote, CreatePayNoteRequest, mapChainPaynoteToApi } from "./types";
 import { getPaynoteFromChain, markPaidOnChain } from "./contractClient";
 import { getPaynote, getPaynotesByCreator, upsertPaynote, getReputationScore } from "./db";
 import { watchAccountForPayments, backfillRecentPayments, resumeWatchingAllAccounts } from "./paymentListener";
@@ -13,33 +13,6 @@ const PORT = 3001;
 
 
 
-// Convert the raw on-chain PayNote shape into the shared frontend/backend
-// PayNote type (see src/types.ts). The contract stores timestamps as unix
-// seconds and amounts as i128 — we convert those into the strings/ISO
-// dates the rest of the API already uses.
-function mapChainPaynoteToApi(chain: any): PayNote {
-  const id = String(chain.id);
-  const status = String(chain.status).toLowerCase() as PayNote["status"];
-
-  const paynote: PayNote = {
-    id,
-    creatorAddress: chain.creator,
-    amount: chain.amount.toString(),
-    asset: chain.asset,
-    description: chain.description,
-    status,
-    createdAt: new Date(Number(chain.created_at) * 1000).toISOString(),
-    expiresAt: new Date(Number(chain.expires_at) * 1000).toISOString(),
-    paymentLink: `http://localhost:3000/pay/${id}`,
-  };
-
-  if (chain.paid_asset && chain.paid_asset !== "NONE") {
-    paynote.paidAmount = chain.paid_amount.toString();
-    paynote.paidAsset = chain.paid_asset;
-  }
-
-  return paynote;
-}
 
 // Sync a PayNote from the chain into our local cache. The frontend calls
 // this right after creating a PayNote directly on-chain via Freighter, so
@@ -102,7 +75,7 @@ app.post("/api/paynotes", async (req: Request<{}, {}, CreatePayNoteRequest>, res
     status: "pending",
     createdAt: new Date().toISOString(),
     expiresAt,
-    paymentLink: `http://localhost:3000/pay/${id}`,
+   paymentLink: `${process.env.FRONTEND_URL || "http://localhost:3000"}/pay/${id}`,
   };
 
   await upsertPaynote(newPayNote);

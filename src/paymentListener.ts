@@ -1,18 +1,17 @@
 import { Horizon } from "@stellar/stellar-sdk";
 import { getPaynoteFromChain, markPaidOnChain } from "./contractClient";
-import { isAccountWatched, markAccountWatched, getAllWatchedAccounts, upsertPaynote } from "./db";
+import {
+  isAccountWatched,
+  markAccountWatched,
+  getAllWatchedAccounts,
+  getPaynote,
+  upsertPaynote,
+} from "./db";
+import { mapChainPaynoteToApi } from "./types";
+
 const HORIZON_URL = "https://horizon-testnet.stellar.org";
 const horizonServer = new Horizon.Server(HORIZON_URL);
 
-
-
-/**
- * Convention: whoever pays a PayNote must include the PayNote's numeric id
- * as a MEMO_TEXT on the payment transaction (e.g. memo "1" for PayNote id 1).
- * This is how we match an incoming payment to the correct PayNote — matching
- * by amount alone isn't reliable since a creator could have multiple pending
- * PayNotes for the same amount.
- */
 function extractPaynoteIdFromMemo(memo: any): number | null {
   if (!memo || memo.value === undefined || memo.value === null) return null;
   const raw = memo.value.toString().trim();
@@ -20,13 +19,6 @@ function extractPaynoteIdFromMemo(memo: any): number | null {
   return Number.isNaN(id) ? null : id;
 }
 
-/**
- * Check recent payment history for an account (most recent first) and
- * process any that match a pending PayNote. This closes the gap where a
- * payment happens BEFORE the live stream starts watching (e.g. right after
- * a server restart, or if sync/:id is called after the payment already
- * landed) — without this, cursor("now") would silently miss it forever.
- */
 export async function backfillRecentPayments(watchedAccount: string) {
   try {
     const page = await horizonServer
@@ -38,34 +30,28 @@ export async function backfillRecentPayments(watchedAccount: string) {
       .call();
 
     for (const record of page.records as any[]) {
-  await handlePaymentRecord(record, watchedAccount);
-}
+      await handlePaymentRecord(record, watchedAccount);
+    }
   } catch (err) {
     console.error(`Backfill check failed for ${watchedAccount}:`, err);
   }
 }
 
-/**
- * Start watching a creator's Stellar account for incoming payments.
- * Safe to call multiple times for the same account — it only opens one
- * stream per account.
- */
 export async function watchAccountForPayments(creatorAddress: string) {
   const alreadyWatched = await isAccountWatched(creatorAddress);
   if (alreadyWatched) {
-    return; // already watching this account
+    return;
   }
   await markAccountWatched(creatorAddress);
 
   console.log(`Starting payment listener for ${creatorAddress}`);
-  // Catch anything that already happened before we started watching.
   await backfillRecentPayments(creatorAddress);
 
   horizonServer
     .payments()
     .forAccount(creatorAddress)
-    .cursor("now") // only new payments from this point forward
-    .join("transactions") // so we can read the memo without a second request
+    .cursor("now")
+    .join("transactions")
     .stream({
       onmessage: async (record: any) => {
         try {
@@ -81,16 +67,13 @@ export async function watchAccountForPayments(creatorAddress: string) {
 }
 
 async function handlePaymentRecord(record: any, watchedAccount: string) {
-  // Only care about operations that actually deliver funds TO the creator
   const relevantTypes = [
     "payment",
     "path_payment_strict_send",
     "path_payment_strict_receive",
   ];
   if (!relevantTypes.includes(record.type)) return;
-
   if (record.to !== watchedAccount) return;
- 
 
   const memo = record.transaction ? (await record.transaction()).memo : undefined;
   const paynoteId = extractPaynoteIdFromMemo({ value: memo });
@@ -120,35 +103,22 @@ async function handlePaymentRecord(record: any, watchedAccount: string) {
     `Matched payment for PayNote ${paynoteId}: ${paidAmount} ${paidAsset}. Calling mark_paid...`
   );
 
-  await markPaidOnChain(paynoteId, paidAmount, paidAsset);
+  const updatedChainPaynote = await markPaidOnChain(paynoteId, paidAmount, paidAsset);
+  const updated = mapChainPaynoteToApi(updatedChainPaynote);
 
-  const updatedChainPaynote = await getPaynoteFromChain(paynoteId);
-  const status = String(updatedChainPaynote.status).toLowerCase();
-  await upsertPaynote({
-    id: String(updatedChainPaynote.id),
-    creatorAddress: updatedChainPaynote.creator,
-    amount: updatedChainPaynote.amount.toString(),
-    asset: updatedChainPaynote.asset,
-    description: updatedChainPaynote.description,
-    status: status as any,
-    createdAt: new Date(Number(updatedChainPaynote.created_at) * 1000).toISOString(),
-    expiresAt: new Date(Number(updatedChainPaynote.expires_at) * 1000).toISOString(),
-    paidAmount: updatedChainPaynote.paid_amount?.toString(),
-    paidAsset: updatedChainPaynote.paid_asset,
-    paymentLink: `http://localhost:3000/pay/${updatedChainPaynote.id}`,
-  });
+  // Preserve the existing public_token and payment_link — this listener
+  // never generates them, and upserting without them would wipe them out.
+  const existing = await getPaynote(String(paynoteId));
+  if (existing) {
+    updated.publicToken = existing.publicToken;
+    updated.paymentLink = existing.paymentLink;
+  }
 
-  console.log(`PayNote ${paynoteId} marked as paid on-chain and synced to DB.`);
+  await upsertPaynote(updated);
+
+  console.log(`PayNote ${paynoteId} marked as paid on-chain and DB updated.`);
 }
 
-// Called once on server startup — re-opens Horizon streams for every
-// account we were already watching before the last restart, since the
-// in-memory stream itself doesn't survive a restart even though the DB
-// record marking it "watched" does.
-// Called once on server startup — re-opens Horizon streams for every
-// account we were already watching before the last restart, since the
-// in-memory stream itself doesn't survive a restart even though the DB
-// record marking it "watched" does.
 export async function resumeWatchingAllAccounts() {
   const accounts = await getAllWatchedAccounts();
   console.log(`Resuming payment listeners for ${accounts.length} account(s)`);

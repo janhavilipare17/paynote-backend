@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import crypto from "crypto";
 import { PayNote } from "./types";
 
 export const pool = new Pool({
@@ -18,6 +19,7 @@ function rowToPaynote(row: any): PayNote {
     createdAt: row.created_at.toISOString(),
     expiresAt: row.expires_at.toISOString(),
     paymentLink: row.payment_link,
+    publicToken: row.public_token,
   };
   if (row.paid_amount && row.paid_asset) {
     paynote.paidAmount = row.paid_amount;
@@ -32,6 +34,25 @@ export async function getPaynote(id: string): Promise<PayNote | null> {
   return rowToPaynote(result.rows[0]);
 }
 
+// Public-facing lookup — used by the pay page and API instead of the
+// guessable sequential chain id, so the URL/endpoint can't be enumerated.
+export async function getPaynoteByToken(token: string): Promise<PayNote | null> {
+  const result = await pool.query("SELECT * FROM paynotes WHERE public_token = $1", [token]);
+  if (result.rows.length === 0) return null;
+  return rowToPaynote(result.rows[0]);
+}
+
+// Returns the existing public_token for this PayNote id if one is already
+// stored, otherwise generates a fresh random one. Doesn't write to the DB —
+// caller is responsible for including it in the next upsertPaynote call.
+export async function getOrCreatePublicToken(id: string): Promise<string> {
+  const result = await pool.query("SELECT public_token FROM paynotes WHERE id = $1", [id]);
+  if (result.rows.length > 0 && result.rows[0].public_token) {
+    return result.rows[0].public_token;
+  }
+  return "pn_" + crypto.randomBytes(16).toString("hex");
+}
+
 export async function getPaynotesByCreator(address: string): Promise<PayNote[]> {
   const result = await pool.query(
     "SELECT * FROM paynotes WHERE creator_address = $1",
@@ -43,8 +64,8 @@ export async function getPaynotesByCreator(address: string): Promise<PayNote[]> 
 // Insert or update a PayNote (used by sync, recheck, and creation).
 export async function upsertPaynote(paynote: PayNote): Promise<void> {
   await pool.query(
-    `INSERT INTO paynotes (id, creator_address, amount, asset, description, status, created_at, expires_at, paid_amount, paid_asset, payment_link)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    `INSERT INTO paynotes (id, creator_address, amount, asset, description, status, created_at, expires_at, paid_amount, paid_asset, payment_link, public_token)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
      ON CONFLICT (id) DO UPDATE SET
        creator_address = EXCLUDED.creator_address,
        amount = EXCLUDED.amount,
@@ -55,7 +76,8 @@ export async function upsertPaynote(paynote: PayNote): Promise<void> {
        expires_at = EXCLUDED.expires_at,
        paid_amount = EXCLUDED.paid_amount,
        paid_asset = EXCLUDED.paid_asset,
-       payment_link = EXCLUDED.payment_link`,
+       payment_link = EXCLUDED.payment_link,
+       public_token = EXCLUDED.public_token`,
     [
       paynote.id,
       paynote.creatorAddress,
@@ -68,12 +90,11 @@ export async function upsertPaynote(paynote: PayNote): Promise<void> {
       paynote.paidAmount || null,
       paynote.paidAsset || null,
       paynote.paymentLink,
+      paynote.publicToken,
     ]
   );
 }
 
-// Watched-accounts table replaces the in-memory Set in paymentListener.ts,
-// so the listener knows what it was already watching after a restart.
 export async function isAccountWatched(address: string): Promise<boolean> {
   const result = await pool.query(
     "SELECT 1 FROM watched_accounts WHERE address = $1",

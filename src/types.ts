@@ -15,6 +15,7 @@ export interface PayNote {
   paidAmount?: string;        // filled once paid, may differ from `amount` (path payments)
   paidAsset?: string;         // e.g. "EURC" if payer used a different asset
   paymentLink?: string;       // shareable link to the payment page
+  publicToken?: string;       // opaque random token used in the public URL instead of the sequential chain id
 }
 
 export interface CreatePayNoteRequest {
@@ -25,9 +26,14 @@ export interface CreatePayNoteRequest {
   expiresAt: string;
 }
 
+// Convert the raw on-chain PayNote shape into the shared frontend/backend
+// PayNote type. The contract stores timestamps as unix seconds and amounts
+// as i128 — we convert those into the strings/ISO dates the API uses.
+// Note: publicToken/paymentLink are NOT set here — the caller is
+// responsible for attaching those, since this function has no DB access.
 export function mapChainPaynoteToApi(chain: any): PayNote {
   const id = String(chain.id);
-  const status = String(chain.status).toLowerCase() as PayNote["status"];
+  const status = String(chain.status).toLowerCase() as PayNoteStatus;
 
   const paynote: PayNote = {
     id,
@@ -38,7 +44,6 @@ export function mapChainPaynoteToApi(chain: any): PayNote {
     status,
     createdAt: new Date(Number(chain.created_at) * 1000).toISOString(),
     expiresAt: new Date(Number(chain.expires_at) * 1000).toISOString(),
-    paymentLink: `${process.env.FRONTEND_URL || "http://localhost:3000"}/pay/${id}`,
   };
 
   if (chain.paid_asset && chain.paid_asset !== "NONE") {

@@ -12,11 +12,9 @@ import {
 
 // ---- Config ----
 // Testnet Soroban RPC endpoint
-const RPC_URL = "https://soroban-testnet.stellar.org";
-const NETWORK_PASSPHRASE = Networks.TESTNET;
-
-// Your deployed contract ID (from `stellar contract deploy`)
-const CONTRACT_ID = "CAYUDIMIOMD7YPPDS76VLUY5PZFTVFTEKQXV2M7CA374TAGX2U7WPW7R";
+const RPC_URL = "https://rpc.lightsail.network";
+const NETWORK_PASSPHRASE = Networks.PUBLIC;
+const CONTRACT_ID = "CAUCCQFSBSCAS6F5KEA2UDCS3UHCUNQNSKZZOYN4RQXVIQ6XZ4D6M736";
 
 // The backend's own signing key, used ONLY for calling mark_paid
 // (mark_paid has no require_auth in the contract, so any account can call it —

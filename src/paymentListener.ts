@@ -9,7 +9,7 @@ import {
 } from "./db";
 import { mapChainPaynoteToApi } from "./types";
 
-const HORIZON_URL = "https://horizon-testnet.stellar.org";
+const HORIZON_URL = "https://horizon.stellar.org";
 const horizonServer = new Horizon.Server(HORIZON_URL);
 
 function extractPaynoteIdFromMemo(memo: any): number | null {

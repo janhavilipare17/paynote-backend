@@ -126,5 +126,9 @@ app.get("/api/reputation/:address", async (req: Request<{ address: string }>, re
 
 app.listen(PORT, async () => {
   console.log(`PayNote mock backend running at http://localhost:${PORT}`);
-  await resumeWatchingAllAccounts();
+  try {
+    await resumeWatchingAllAccounts();
+  } catch (err) {
+    console.error("Warning: resumeWatchingAllAccounts failed (DB likely not connected locally):", err);
+  }
 });

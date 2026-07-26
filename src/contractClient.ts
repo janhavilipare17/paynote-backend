@@ -12,8 +12,9 @@ import {
 
 // ---- Config ----
 // Testnet Soroban RPC endpoint
-const RPC_URL = "https://rpc.lightsail.network";
+const RPC_URL = "https://mainnet.sorobanrpc.com";
 const NETWORK_PASSPHRASE = Networks.PUBLIC;
+...
 const CONTRACT_ID = "CAUCCQFSBSCAS6F5KEA2UDCS3UHCUNQNSKZZOYN4RQXVIQ6XZ4D6M736";
 
 // The backend's own signing key, used ONLY for calling mark_paid

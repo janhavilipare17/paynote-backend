@@ -11,10 +11,11 @@ import {
 } from "@stellar/stellar-sdk";
 
 // ---- Config ----
-// Testnet Soroban RPC endpoint
+// Mainnet Soroban RPC endpoint
 const RPC_URL = "https://mainnet.sorobanrpc.com";
 const NETWORK_PASSPHRASE = Networks.PUBLIC;
-...
+
+// Your deployed contract ID (from `stellar contract deploy`)
 const CONTRACT_ID = "CAUCCQFSBSCAS6F5KEA2UDCS3UHCUNQNSKZZOYN4RQXVIQ6XZ4D6M736";
 
 // The backend's own signing key, used ONLY for calling mark_paid

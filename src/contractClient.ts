@@ -23,7 +23,7 @@ const CONTRACT_ID = "CAUCCQFSBSCAS6F5KEA2UDCS3UHCUNQNSKZZOYN4RQXVIQ6XZ4D6M736";
 // this is fine for now since it's your own trusted backend service).
 // Set this via environment variable, never hardcode a real secret key.
 const BACKEND_SECRET_KEY = process.env.BACKEND_STELLAR_SECRET || "";
-
+console.log("SECRET_KEY_LENGTH:", BACKEND_SECRET_KEY.length, "STARTS_WITH:", BACKEND_SECRET_KEY.slice(0, 2));
 const server = new rpc.Server(RPC_URL);
 const contract = new Contract(CONTRACT_ID);
 

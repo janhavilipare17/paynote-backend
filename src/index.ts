@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express, { Request, Response } from "express";
 import cors from "cors";
+import { Resend } from "resend";
 import { PayNote, CreatePayNoteRequest, mapChainPaynoteToApi } from "./types";
 import { getPaynoteFromChain, markPaidOnChain } from "./contractClient";
 import {
@@ -12,11 +13,46 @@ import {
   getReputationScore,
 } from "./db";
 import { watchAccountForPayments, backfillRecentPayments, resumeWatchingAllAccounts } from "./paymentListener";
+
+
+
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const PORT = 3001;
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+app.post("/api/paynotes/token/:token/send-email", async (req: Request<{ token: string }>, res: Response) => {
+  try {
+    const { toEmail } = req.body;
+    if (!toEmail) {
+      return res.status(400).json({ error: "Missing toEmail" });
+    }
+
+    const paynote = await getPaynoteByToken(req.params.token);
+    if (!paynote) {
+      return res.status(404).json({ error: "PayNote not found" });
+    }
+
+    await resend.emails.send({
+      from: "PayNote <onboarding@resend.dev>",
+      to: toEmail,
+      subject: `Payment request: ${paynote.amount} ${paynote.asset}`,
+      html: `
+        <p>You've received a payment request for <strong>${paynote.amount} ${paynote.asset}</strong>.</p>
+        <p><strong>Description:</strong> ${paynote.description}</p>
+        <p><a href="${paynote.paymentLink}">Click here to pay</a></p>
+      `,
+    });
+
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error("Send email failed:", err);
+    res.status(500).json({ error: "Failed to send email", details: err.message });
+  }
+});
 
 // Sync a PayNote from the chain into our local cache. The frontend calls
 // this right after creating a PayNote directly on-chain via Freighter, so

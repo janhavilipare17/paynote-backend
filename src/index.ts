@@ -43,7 +43,7 @@ app.post("/api/paynotes/token/:token/send-email", async (req: Request<{ token: s
       html: `
         <p>You've received a payment request for <strong>${paynote.amount} ${paynote.asset}</strong>.</p>
         <p><strong>Description:</strong> ${paynote.description}</p>
-        <p><a href="${paynote.paymentLink}">Click here to pay</a></p>
+        <p><a href="${process.env.FRONTEND_URL || "https://pay-note-nine.vercel.app"}/pay/${paynote.publicToken}">Click here to pay</a></p>
       `,
     });
 
